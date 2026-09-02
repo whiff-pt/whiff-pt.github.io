@@ -1,9 +1,11 @@
 /* Whiff — UI layer. State lives in localStorage; all forecasting is in model.js. */
 
 import {
-  MILL, DEFAULTS, siteGeometry, buildNights, currentNightKey, explain, compass, clamp, level,
+  MILL, DEFAULTS, MODEL_VERSION, siteGeometry, buildNights, currentNightKey, explain,
+  compass, clamp, level,
 } from './model.js';
 import { fetchWeather, fetchElevation, geocode, nowInPT } from './weather.js';
+import { submit, requestRemoval, buildRow, isShareConfigured } from './share.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE = 'whiff.settings.v1';
@@ -17,6 +19,8 @@ const state = {
   nightEndHour: DEFAULTS.nightEndHour,
   model: 'best_match',
   lastNotifiedNight: null,
+  shareEnabled: false, // never default this to true
+  hasEverShared: false,
   nights: [],
 };
 
@@ -143,6 +147,7 @@ async function refresh() {
     state.nights = startIdx >= 0 ? all.slice(startIdx) : all;
 
     render(geo, now);
+    flushUnshared();
     $('dataStamp').textContent =
       ` Open-Meteo ${wx.model}, updated ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
     maybeNotify();
@@ -238,12 +243,92 @@ function renderOutlook(now) {
 function renderFeedback(tonight) {
   const rows = readLog();
   const mine = rows.find((r) => r.night === tonight.key);
+
   document.querySelectorAll('.report').forEach((b) => {
     b.setAttribute('aria-pressed', String(mine?.smell === Number(b.dataset.smell)));
   });
-  $('feedbackStatus').textContent = mine
-    ? `Logged for tonight. ${rows.length} report${rows.length === 1 ? '' : 's'} saved.`
-    : `${rows.length} report${rows.length === 1 ? '' : 's'} saved on this device.`;
+
+  // The timing question only makes sense once something was actually smelled.
+  $('whenBlock').hidden = !(mine && mine.smell >= 1);
+  document.querySelectorAll('.when').forEach((b) => {
+    b.setAttribute('aria-pressed', String(mine?.smellWindow === b.dataset.when));
+  });
+
+  const needsWhen = mine && mine.smell >= 1 && !mine.smellWindow;
+  $('feedbackStatus').textContent = needsWhen
+    ? 'Logged — now pick roughly when, above.'
+    : mine
+      ? `Logged for tonight. ${rows.length} report${rows.length === 1 ? '' : 's'} saved on this device.`
+      : `${rows.length} report${rows.length === 1 ? '' : 's'} saved on this device.`;
+
+  renderShareState(mine);
+}
+
+// ---------------------------------------------------------------------------
+// Shared logging
+// ---------------------------------------------------------------------------
+
+function renderShareState(mine) {
+  if (!isShareConfigured()) return; // block stays hidden; app is local-only
+  $('shareEnabled').checked = state.shareEnabled;
+  $('removalBtn').hidden = !state.hasEverShared;
+
+  if (!state.shareEnabled) {
+    $('shareStatus').textContent = '';
+  } else if (mine?.shared) {
+    $('shareStatus').textContent = "Tonight's report has been contributed. Thank you.";
+  } else if (mine) {
+    $('shareStatus').textContent = 'Will be contributed once you pick a time band.';
+  } else {
+    $('shareStatus').textContent = 'Sharing is on. Nothing sent yet tonight.';
+  }
+  if (!$('sharePreview').hidden) refreshPreview(mine);
+}
+
+/** Show the literal JSON body, so "what gets sent" is not a promise but a fact. */
+function refreshPreview(mine) {
+  const geo = state.site ? siteGeometry(state.site) : null;
+  if (!geo) return;
+  const sample = mine ?? {
+    night: state.nights[0]?.key ?? '—',
+    smell: 0,
+    smellWindow: null,
+    predicted: Number((state.nights[0]?.p ?? 0).toFixed(4)),
+    peakHour: state.nights[0]?.peak.hour.iso,
+    windDir: state.nights[0]?.peak.factors.windDir,
+    windSpeed: state.nights[0]?.peak.factors.ws,
+    alignment: 0, stability: 0, moisture: 0, decoupled: 0,
+    modelVersion: MODEL_VERSION,
+  };
+  $('sharePreview').textContent = JSON.stringify(buildRow(sample, geo), null, 2);
+}
+
+/**
+ * Send a report if sharing is on and it is complete. A report with a smell but
+ * no time band is deliberately withheld — the timing is the most valuable
+ * column in the table, and a half-filled row would dilute it.
+ */
+async function maybeShare(entry) {
+  if (!isShareConfigured() || !state.shareEnabled || !state.site) return;
+  if (entry.smell >= 1 && !entry.smellWindow) return;
+
+  const ok = await submit(entry, siteGeometry(state.site));
+  if (ok) {
+    const rows = readLog();
+    const row = rows.find((r) => r.night === entry.night);
+    if (row) { row.shared = true; writeLog(rows); }
+    state.hasEverShared = true;
+    save();
+  }
+  const tonight = state.nights[0];
+  if (tonight) renderFeedback(tonight);
+}
+
+/** Retry anything that failed to send while offline. */
+async function flushUnshared() {
+  if (!isShareConfigured() || !state.shareEnabled || !state.site) return;
+  const pending = readLog().filter((r) => !r.shared && !(r.smell >= 1 && !r.smellWindow));
+  for (const entry of pending) await maybeShare(entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -364,25 +449,85 @@ function wire() {
     btn.addEventListener('click', () => {
       const tonight = state.nights[0];
       if (!tonight) return;
+      const geo = siteGeometry(state.site);
+      const f = tonight.peak.factors;
+      const prev = readLog().find((r) => r.night === tonight.key);
+      const smell = Number(btn.dataset.smell);
       const rows = readLog().filter((r) => r.night !== tonight.key);
-      rows.push({
+      const entry = {
         night: tonight.key,
         loggedAt: new Date().toISOString(),
-        smell: Number(btn.dataset.smell),
+        smell,
+        // "Nothing" has no time band; changing the severity keeps the band.
+        smellWindow: smell === 0 ? null : (prev?.smellWindow ?? null),
         predicted: Number(tonight.p.toFixed(4)),
         peakHour: tonight.peak.hour.iso,
-        windDir: tonight.peak.factors.windDir,
-        windSpeed: Number(tonight.peak.factors.ws.toFixed(2)),
-        alignment: Number(tonight.peak.factors.alignment.toFixed(3)),
-        stability: Number(tonight.peak.factors.stability.toFixed(3)),
-        moisture: Number(tonight.peak.factors.moisture.toFixed(3)),
-        distKm: Number(siteGeometry(state.site).distKm.toFixed(2)),
-        bearing: Math.round(siteGeometry(state.site).bearingFromMill),
-      });
+        windDir: f.windDir,
+        windSpeed: Number(f.ws.toFixed(2)),
+        alignment: Number(f.alignment.toFixed(3)),
+        stability: Number(f.stability.toFixed(3)),
+        moisture: Number(f.moisture.toFixed(3)),
+        decoupled: Number(f.decoupled.toFixed(3)),
+        distKm: Number(geo.distKm.toFixed(2)),
+        bearing: Math.round(geo.bearingFromMill),
+        modelVersion: MODEL_VERSION,
+        shared: false,
+      };
+      rows.push(entry);
       writeLog(rows);
       renderFeedback(tonight);
+      maybeShare(entry);
     });
   });
+
+  document.querySelectorAll('.when').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tonight = state.nights[0];
+      if (!tonight) return;
+      const rows = readLog();
+      const entry = rows.find((r) => r.night === tonight.key);
+      if (!entry) return;
+      entry.smellWindow = btn.dataset.when;
+      entry.shared = false; // the row changed, so re-send it
+      writeLog(rows);
+      renderFeedback(tonight);
+      maybeShare(entry);
+    });
+  });
+
+  if (isShareConfigured()) {
+    $('shareBlock').hidden = false;
+    $('shareEnabled').addEventListener('change', (e) => {
+      state.shareEnabled = e.target.checked;
+      save();
+      // Only ever forward-looking: turning this on does not publish the log
+      // that already exists, only nights logged from here on.
+      if (state.shareEnabled) {
+        const tonight = state.nights[0];
+        const mine = tonight && readLog().find((r) => r.night === tonight.key);
+        if (mine) maybeShare(mine);
+      }
+      renderFeedback(state.nights[0] ?? { key: null });
+    });
+
+    $('shareDetailsToggle').addEventListener('click', () => {
+      const pre = $('sharePreview');
+      pre.hidden = !pre.hidden;
+      $('shareDetailsToggle').textContent = pre.hidden ? 'See exactly what gets sent' : 'Hide';
+      if (!pre.hidden) refreshPreview(readLog().find((r) => r.night === state.nights[0]?.key));
+    });
+
+    $('removalBtn').addEventListener('click', async () => {
+      $('shareStatus').textContent = 'Sending removal request…';
+      const ok = await requestRemoval();
+      state.shareEnabled = false;
+      $('shareEnabled').checked = false;
+      save();
+      $('shareStatus').textContent = ok
+        ? 'Sharing off, and removal requested. Your past reports will be deleted at the next cleanup.'
+        : 'Sharing is now off, but the removal request could not be sent. Try again later.';
+    });
+  }
 
   $('exportBtn').addEventListener('click', () => {
     const rows = readLog();

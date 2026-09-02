@@ -23,22 +23,41 @@ if (!path) {
   exit(1);
 }
 
-const rows = parseCsv(await readFile(path, 'utf8'));
-if (!rows.length) {
+const all = parseCsv(await readFile(path, 'utf8'));
+if (!all.length) {
   console.error('No rows in that CSV.');
   exit(1);
+}
+
+// Accepts either the browser's own export or notifier/pull-observations.mjs
+// output. They differ in casing and in which columns exist.
+const shared = 'model_version' in all[0];
+const col = shared
+  ? { predicted: 'predicted', smell: 'smell', night: 'night', version: 'model_version', window: 'smell_window' }
+  : { predicted: 'predicted', smell: 'smell', night: 'night', version: 'modelVersion', window: 'smellWindow' };
+
+// Probabilities from different model generations are not comparable, so fit
+// the newest generation present and say what was dropped.
+const versions = [...new Set(all.map((r) => r[col.version]).filter(Boolean))];
+let rows = all;
+if (versions.length > 1) {
+  const newest = versions.sort().at(-1);
+  rows = all.filter((r) => r[col.version] === newest);
+  console.error(`Mixed model versions ${versions.join(', ')} — fitting ${newest} only ` +
+                `(${rows.length} of ${all.length} rows).\n`);
 }
 
 // The app logs the predicted probability under the defaults in force at the
 // time; invert the logistic to recover the exposure index it came from.
 const samples = rows
   .map((r) => {
-    const p = clamp(Number(r.predicted), 1e-4, 1 - 1e-4);
+    const p = clamp(Number(r[col.predicted]), 1e-4, 1 - 1e-4);
     const z = Math.log(p / (1 - p));
     return {
       logE: z * DEFAULTS.k + Math.log(DEFAULTS.e50),
-      smelled: Number(r.smell) >= 1 ? 1 : 0,
-      night: r.night,
+      smelled: Number(r[col.smell]) >= 1 ? 1 : 0,
+      window: r[col.window] || null,
+      night: r[col.night],
     };
   })
   .filter((s) => Number.isFinite(s.logE));
@@ -96,6 +115,27 @@ for (const [lo, hi] of buckets) {
   const rate = inBucket.filter((s) => s.smelled).length / inBucket.length;
   console.log(`  forecast ${(lo * 100).toFixed(0)}-${(hi * 100).toFixed(0)}%: ` +
               `observed ${(rate * 100).toFixed(0)}% over ${inBucket.length} night(s)`);
+}
+
+// Timing is a mechanism check, not a calibration one, so it sits outside the
+// fit. A pile of pre-dawn reports says the decoupling term is doing the work;
+// a pile of evening ones on nights the model called quiet says something in
+// the plume-transport half is still missing.
+const byWindow = {};
+for (const s of samples.filter((x) => x.window)) {
+  byWindow[s.window] ??= [];
+  byWindow[s.window].push(s);
+}
+if (Object.keys(byWindow).length) {
+  console.log('\nWhen the smell actually arrived:');
+  for (const [w, list] of Object.entries(byWindow).sort((a, b) => b[1].length - a[1].length)) {
+    const missed = list.filter((s) => {
+      const p = 1 / (1 + Math.exp(-(s.logE - Math.log(best.e50)) / best.k));
+      return p < 0.25;
+    }).length;
+    console.log(`  ${w.padEnd(9)} ${String(list.length).padStart(3)} night(s)` +
+                (missed ? `  — ${missed} the model called under 25%` : ''));
+  }
 }
 
 function parseCsv(text) {

@@ -73,15 +73,45 @@
   <!-- ── Did you smell it? ───────────────────────────────────────────── -->
   <section class="card" id="feedbackCard" hidden>
     <h2>Did you actually smell it?</h2>
-    <p class="muted small">Logged on this device only. Export the log to check — or improve — the model's calibration.</p>
+    <p class="muted small">This is the only thing that can tell whether the forecast above is any good.</p>
     <div class="row">
       <button type="button" class="report" data-smell="3">Strong</button>
       <button type="button" class="report" data-smell="2">Noticeable</button>
       <button type="button" class="report" data-smell="1">Faint</button>
       <button type="button" class="report" data-smell="0">Nothing</button>
     </div>
+
+    <div id="whenBlock" hidden>
+      <h3>When?</h3>
+      <p class="muted small">Timing matters more than you'd think — an evening smell and a pre-dawn
+        one come from completely different mechanisms, and the model treats them differently.</p>
+      <div class="row">
+        <button type="button" class="when" data-when="evening">Evening<br><span class="muted small">7–11pm</span></button>
+        <button type="button" class="when" data-when="late">Late<br><span class="muted small">11pm–2am</span></button>
+        <button type="button" class="when" data-when="predawn">Pre-dawn<br><span class="muted small">2–7am</span></button>
+        <button type="button" class="when" data-when="allnight">All night</button>
+      </div>
+    </div>
+
     <p id="feedbackStatus" class="muted small"></p>
-    <button type="button" id="exportBtn" class="link">Export log (CSV)</button>
+
+    <div id="shareBlock" hidden>
+      <label class="field checkbox">
+        <input type="checkbox" id="shareEnabled">
+        <span>Contribute my reports to the shared calibration dataset</span>
+      </label>
+      <p class="muted small">
+        Off by default. Your street address never leaves this browser — reports carry only
+        your distance and direction from the mill, rounded to a neighbourhood, with a random
+        ID and no name or email. Only nights you log <em>after</em> switching this on are sent.
+        <button type="button" id="shareDetailsToggle" class="link">See exactly what gets sent</button>
+      </p>
+      <pre id="sharePreview" class="payload" hidden></pre>
+      <p id="shareStatus" class="muted small"></p>
+      <button type="button" id="removalBtn" class="link" hidden>Stop sharing and request removal of my past reports</button>
+    </div>
+
+    <button type="button" id="exportBtn" class="link">Export my log (CSV)</button>
   </section>
 
   <!-- ── Alerts ──────────────────────────────────────────────────────── -->

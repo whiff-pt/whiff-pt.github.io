@@ -127,7 +127,10 @@ failure mode is false positives on calm nights that turned out fine, and
 nothing here tests for that yet — which is what the nightly log below is for.
 
 The app also closes the loop prospectively. Each night you can log whether you
-actually smelled anything; the log lives in your browser and exports as CSV.
+smelled anything **and roughly when** — the time band is the single most
+informative column, because an evening report and a pre-dawn one implicate
+different mechanisms. The log lives in your browser and exports as CSV.
+
 Once you have thirty-odd nights covering both smelly and clean conditions:
 
 ```bash
@@ -138,6 +141,77 @@ It maximum-likelihood-fits the two free constants (`e50`, `k` in
 `src/model.js`), reports the improvement over the current defaults, and prints a
 reliability table — observed odor rate per forecast bucket. If the fit isn't
 meaningfully better than the defaults it tells you to leave them alone.
+
+## Shared logging
+
+One person's log is thirty anecdotes. Thirty people's logs are a dataset — and
+nobody has published one for this mill, which is the main reason the model
+can't be properly calibrated today. Shared logging is the opt-in that turns the
+first into the second.
+
+**It is off until you configure a backend**, and the sharing UI stays hidden
+entirely. The app is local-only out of the box.
+
+### Setting it up
+
+1. Create a free [Supabase](https://supabase.com) project.
+2. Paste `supabase/schema.sql` into its SQL editor and run it once.
+3. Put the project URL and the **anon** key into `src/share-config.js`, commit,
+   push. That's it.
+
+The anon key is public by design — it ships in the JavaScript of every Supabase
+web app. It is safe here because the schema grants it **insert and update only,
+with no read policy at all**. Someone who takes the key from your source can add
+rows; they cannot read a single one, so they cannot learn who reported what.
+The `service_role` key is the one that matters — keep it in your shell, never in
+this repo.
+
+### What a contributor actually sends
+
+```json
+{
+  "install_id": "15eb67a1-4485-4ca9-bc85-02904d4089a9",
+  "night": "2026-09-02", "smell": 2, "smell_window": "predawn",
+  "dist_km": 1.75, "bearing_deg": 0, "elevation_m": 80,
+  "predicted": 0.709, "peak_hour": 21, "wind_dir": 199, "wind_speed": 2.75,
+  "alignment": 0.852, "stability": 0.598, "moisture": 0, "decoupled": 0,
+  "model_version": "0.2.0"
+}
+```
+
+The design rules, which the UI states plainly and a "see exactly what gets sent"
+button proves:
+
+- **The street address never leaves the browser.** Location goes as distance and
+  bearing from the mill, rounded to 0.25 km and 10° — about a 250 × 520 m cell at
+  3 km. That is a neighbourhood, not a house, and it is all the model consumes.
+- **No name, no email, no account.** Identity is a UUID generated on the device.
+- **Nothing retroactive.** Switching sharing on shares tonight onward. A month of
+  private logs stays private — that month was not consented to.
+- **Incomplete reports are withheld.** A smell with no time band isn't sent,
+  because a row missing the most valuable column dilutes the table.
+- **Removal is a request, not a button.** Anon can't delete rows — otherwise
+  anyone who learned an install ID could erase someone's history. The app files
+  a request; you action it with the query in `schema.sql`.
+
+### Reading the dataset
+
+```bash
+SUPABASE_URL=https://xxxx.supabase.co SUPABASE_SERVICE_KEY=eyJ... \
+  node notifier/pull-observations.mjs > observations.csv
+```
+
+CSV to stdout, a summary to stderr — contributor count, smelly-vs-clean split,
+how many reports carry a time band, and a warning if model versions are mixed
+(probabilities from different versions are not comparable). `install_id` is
+fetched for the contributor count but deliberately never written to the CSV, so
+the working dataset carries no key linking one person's nights together.
+
+Then feed it straight to the fitter, which reads either CSV format:
+
+```bash
+node notifier/calibrate.mjs observations.csv
+```
 
 To check the model still discriminates across the peninsula:
 

@@ -3,19 +3,34 @@
  * offline. Forecast requests always go to the network — a stale forecast is
  * worse than no forecast.
  */
-const CACHE = 'whiff-v1';
+const CACHE = 'whiff-v2';
+// Note the absence of './index.html': many static hosts (including `serve`)
+// answer it with a 301 to './', and the Cache API refuses to store a redirected
+// response. Listing both meant addAll rejected and the worker never installed.
 const SHELL = [
   './',
-  './index.html',
   './styles.css',
   './src/app.js',
   './src/model.js',
   './src/weather.js',
+  './src/share.js',
+  './src/share-config.js',
   './manifest.webmanifest',
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Cache each file independently. addAll() is all-or-nothing, so one 404 or
+  // one redirect anywhere in SHELL would leave the app with no offline support
+  // at all — and fail silently, since nothing in the page observes it.
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    const results = await Promise.allSettled(SHELL.map((url) => cache.add(url)));
+    const failed = results
+      .map((r, i) => (r.status === 'rejected' ? SHELL[i] : null))
+      .filter(Boolean);
+    if (failed.length) console.warn('Whiff SW: could not cache', failed);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
@@ -36,7 +51,7 @@ self.addEventListener('fetch', (e) => {
         caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
         return res;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('./index.html'))),
+      .catch(() => caches.match(e.request).then((r) => r || caches.match('./'))),
   );
 });
 

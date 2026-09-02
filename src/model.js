@@ -15,6 +15,12 @@ export const MILL = {
   name: 'Port Townsend Paper Co.',
 };
 
+/**
+ * Bumped whenever a change would alter the probability for identical weather.
+ * Stamped onto every observation so calibration never mixes model generations.
+ */
+export const MODEL_VERSION = '0.2.0';
+
 export const DEFAULTS = {
   nightStartHour: 19, // 7pm local
   nightEndHour: 7, //    7am local next day
