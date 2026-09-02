@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Whiff — Port Townsend mill odor forecast</title>
+<meta name="description" content="Will you smell the paper mill tonight? A wind, inversion and fog forecast for your Port Townsend address.">
+<meta name="theme-color" content="#12241f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%91%83</text></svg>">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1><span aria-hidden="true">👃</span> Whiff</h1>
+  <p class="tagline">Will the mill reach your address tonight?</p>
+</header>
+
+<main>
+
+  <!-- ── Address ─────────────────────────────────────────────────────── -->
+  <section class="card" id="locationCard">
+    <h2>Your address</h2>
+    <form id="addressForm" class="row" autocomplete="off">
+      <input id="addressInput" type="search" placeholder="e.g. 1010 Water St" aria-label="Street address" required>
+      <button type="submit" class="primary">Find</button>
+      <button type="button" id="gpsBtn" title="Use my current location" aria-label="Use my current location">◎</button>
+    </form>
+    <ul id="geoResults" class="geo-results" hidden></ul>
+    <p id="locationSummary" class="muted small">No address set. You can also drag the pin on the map.</p>
+    <div id="map" aria-label="Map of the mill and your address"></div>
+  </section>
+
+  <!-- ── Tonight ─────────────────────────────────────────────────────── -->
+  <section class="card verdict" id="verdictCard" hidden>
+    <div class="dial-wrap">
+      <svg class="dial" viewBox="0 0 200 200" role="img" aria-labelledby="dialLabel">
+        <title id="dialLabel">Probability of smelling the mill tonight</title>
+        <circle class="dial-track" cx="100" cy="100" r="84"></circle>
+        <circle class="dial-value" id="dialValue" cx="100" cy="100" r="84"
+                transform="rotate(-90 100 100)"></circle>
+      </svg>
+      <div class="dial-text">
+        <output id="pctText">–</output>
+        <span id="levelText" class="level">–</span>
+      </div>
+    </div>
+    <p id="nightLabel" class="muted small"></p>
+    <p id="headline" class="headline"></p>
+    <ul id="reasons" class="reasons"></ul>
+    <button type="button" id="detailsToggle" class="link">Show the numbers</button>
+    <div id="details" hidden>
+      <h3>What's driving it <span class="muted small">(worst hour)</span></h3>
+      <ul id="factorBars" class="factors"></ul>
+      <h3>Hour by hour</h3>
+      <div class="table-scroll">
+        <table id="hourTable">
+          <thead><tr><th>Hour</th><th>Chance</th><th>Wind</th><th>Off-axis</th><th>Stability</th><th>RH</th><th>Vis</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Outlook ─────────────────────────────────────────────────────── -->
+  <section class="card" id="outlookCard" hidden>
+    <h2>Next few nights</h2>
+    <ul id="outlook" class="outlook"></ul>
+  </section>
+
+  <!-- ── Did you smell it? ───────────────────────────────────────────── -->
+  <section class="card" id="feedbackCard" hidden>
+    <h2>Did you actually smell it?</h2>
+    <p class="muted small">Logged on this device only. Export the log to check — or improve — the model's calibration.</p>
+    <div class="row">
+      <button type="button" class="report" data-smell="3">Strong</button>
+      <button type="button" class="report" data-smell="2">Noticeable</button>
+      <button type="button" class="report" data-smell="1">Faint</button>
+      <button type="button" class="report" data-smell="0">Nothing</button>
+    </div>
+    <p id="feedbackStatus" class="muted small"></p>
+    <button type="button" id="exportBtn" class="link">Export log (CSV)</button>
+  </section>
+
+  <!-- ── Alerts ──────────────────────────────────────────────────────── -->
+  <section class="card" id="alertCard">
+    <h2>Alerts</h2>
+    <label class="field">
+      Notify me when tonight's chance is at least
+      <span class="inline"><input id="threshold" type="range" min="10" max="90" step="5" value="50">
+      <output id="thresholdOut">50%</output></span>
+    </label>
+    <label class="field checkbox">
+      <input type="checkbox" id="notifyEnabled"> Show a notification on this device
+    </label>
+    <p class="muted small">
+      Browsers can only notify you while this page is open or when you reopen it. For a
+      dependable nightly push to your phone, run <code>notifier/notify.mjs</code> —
+      see the README.
+    </p>
+    <label class="field">Night window
+      <span class="inline">
+        <input id="nightStart" type="number" min="12" max="23" value="19"> :00 to
+        <input id="nightEnd" type="number" min="1" max="11" value="7"> :00
+      </span>
+    </label>
+    <label class="field">Forecast model
+      <select id="modelSelect">
+        <option value="best_match">Best available (5 nights)</option>
+        <option value="gfs_hrrr">HRRR 3 km, high-res (2 nights)</option>
+        <option value="ecmwf_ifs025">ECMWF IFS</option>
+      </select>
+    </label>
+  </section>
+
+  <p class="disclaimer">
+    Not affiliated with Port Townsend Paper Co., the Dept. of Ecology or ORCAA.
+    This is a physical estimate from public weather forecasts, not a measurement
+    and not calibrated against observed odor reports. To report an actual odor
+    event, call ORCAA at 1-800-422-5623.
+    <span id="dataStamp" class="muted"></span>
+  </p>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

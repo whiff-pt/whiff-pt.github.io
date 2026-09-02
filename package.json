@@ -1,0 +1,14 @@
+{
+  "name": "whiff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nightly probability that the Port Townsend paper mill plume reaches your address.",
+  "scripts": {
+    "start": "npx --yes serve@14 -l 5173 .",
+    "test": "node --test test/model.test.mjs",
+    "notify": "node notifier/notify.mjs",
+    "notify:dry": "node notifier/notify.mjs --dry-run --force"
+  },
+  "engines": { "node": ">=18" }
+}

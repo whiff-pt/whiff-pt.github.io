@@ -1,0 +1,4 @@
+node_modules/
+notifier/config.json
+*.log
+.DS_Store

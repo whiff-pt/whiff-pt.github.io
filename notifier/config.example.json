@@ -1,0 +1,28 @@
+{
+  "_comment": "Copy to config.json and edit. Get lat/lon/elevation from the web app: set your address, then read them off the map pin.",
+
+  "ntfyTopic": "whiff-pt-CHANGE-ME-to-something-unguessable",
+  "ntfyServer": "https://ntfy.sh",
+
+  "nightStartHour": 19,
+  "nightEndHour": 7,
+  "model": "best_match",
+
+  "subscribers": [
+    {
+      "label": "Uptown, Lawrence St",
+      "lat": 48.1155,
+      "lon": -122.7695,
+      "elevationM": 33,
+      "threshold": 50
+    },
+    {
+      "label": "Cape George",
+      "lat": 48.1042,
+      "lon": -122.8556,
+      "elevationM": 15,
+      "threshold": 40,
+      "ntfyTopic": "whiff-pt-someone-else"
+    }
+  ]
+}
