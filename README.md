@@ -1,9 +1,15 @@
 # Whiff 👃
 
+### → **[lrcarey222.github.io/whiff](https://lrcarey222.github.io/whiff/)**
+
 **Will you smell the Port Townsend paper mill tonight?**
 
 Enter your address, get a probability for tonight and the next few nights, and
 get a push notification when it clears a threshold you set.
+
+Nothing is stored on any server — your address lives in your own browser and
+never leaves it except as a coordinate lookup. On a phone, "Add to Home Screen"
+installs it as a standalone app.
 
 No API keys, no build step, no backend. Weather comes from
 [Open-Meteo](https://open-meteo.com) and geocoding from
@@ -11,17 +17,37 @@ No API keys, no build step, no backend. Weather comes from
 
 ---
 
-## Run it
+## Deploying and sharing
+
+The live site is GitHub Pages serving `main` from the repository root. Any push
+to `main` redeploys it within a minute or two — there is no build step, so what
+is in the repo is what is on the web.
+
+```bash
+git push          # that's the whole deploy
+```
+
+Returning visitors pick up changes immediately: the service worker is
+network-first for same-origin files, so it never serves a stale app.
+
+### Before sharing it widely
+
+Geocoding uses [Nominatim](https://operations.osmfoundation.org/policies/nominatim/)
+and the map uses [OSM tiles](https://operations.osmfoundation.org/policies/tiles/).
+Both are donated infrastructure with usage policies aimed at exactly this scale
+— one small town's worth of traffic is fine, a link that goes properly viral is
+not. If it takes off, move geocoding to Photon or a keyed provider and tiles to
+a paid host. The map-pin fallback means the app still works if geocoding is
+throttled.
+
+## Run it locally
 
 ```bash
 npm start
 ```
 
 Then open <http://localhost:5173>. (It must be served over HTTP — ES modules and
-service workers don't work from `file://`.) Any static host works: GitHub Pages,
-Netlify, Cloudflare Pages, `python -m http.server`.
-
-On a phone, use "Add to Home Screen" and it installs as a standalone app.
+service workers don't work from `file://`.)
 
 ```bash
 npm test          # model sanity tests
@@ -154,10 +180,24 @@ name, so pick something long. Set `ntfyServer` if you self-host. A generic
 
 ### Run it every afternoon
 
-**GitHub Actions** — `.github/workflows/nightly-whiff.yml` is ready. Push the
-repo, then add your whole config as a repository secret named
-`WHIFF_CONFIG_JSON` (Settings → Secrets and variables → Actions). It runs at
-22:00 UTC, which is 3pm Pacific in summer and 2pm in winter.
+**GitHub Actions** — `.github/workflows/nightly-whiff.yml` is already live on
+this repo. It runs at 22:00 UTC (3pm Pacific in summer, 2pm in winter) and
+currently skips itself, because the config secret doesn't exist yet. To turn it
+on, fill in `notifier/config.json` and upload it as a secret:
+
+```bash
+gh secret set WHIFF_CONFIG_JSON < notifier/config.json
+```
+
+Then check it works without waiting for the schedule:
+
+```bash
+gh workflow run nightly-whiff.yml -f force=true
+```
+
+Two things to know about Actions cron: it is best-effort and can run late by
+tens of minutes under load, and GitHub disables scheduled workflows on a repo
+with no commits for 60 days (it emails first).
 
 **Windows Task Scheduler**
 

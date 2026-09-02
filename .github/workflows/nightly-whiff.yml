@@ -19,7 +19,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # Without this guard the job fails every single night until the secret
+      # exists, which means a daily failure email and an eventual auto-disable.
+      - name: Check for config
+        id: cfg
+        env:
+          WHIFF_CONFIG_JSON: ${{ secrets.WHIFF_CONFIG_JSON }}
+        run: |
+          if [ -z "$WHIFF_CONFIG_JSON" ]; then
+            echo "No WHIFF_CONFIG_JSON secret set — skipping."
+            echo "Add one with:  gh secret set WHIFF_CONFIG_JSON < notifier/config.json"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Score tonight and notify
+        if: steps.cfg.outputs.ready == 'true'
         env:
           # Repository secret containing the whole notifier config as JSON.
           # Settings → Secrets and variables → Actions → New repository secret.
