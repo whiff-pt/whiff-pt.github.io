@@ -1,6 +1,6 @@
 # Whiff 👃
 
-### → **[lrcarey222.github.io/whiff](https://lrcarey222.github.io/whiff/)**
+### → **[whiff-pt.github.io](https://whiff-pt.github.io/)**
 
 **Will you smell the Port Townsend paper mill tonight?**
 
