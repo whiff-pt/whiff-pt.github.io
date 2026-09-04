@@ -14,8 +14,9 @@
 <body>
 
 <header class="topbar">
-  <h1><span aria-hidden="true">👃</span> Whiff</h1>
-  <p class="tagline">Will the mill reach your address tonight?</p>
+  <p class="wordmark"><span aria-hidden="true">👃</span> Whiff</p>
+  <h1 class="big-question">Should I close my windows tonight?</h1>
+  <p class="tagline">A paper-mill odor forecast for your Port Townsend address.</p>
 </header>
 
 <main>
@@ -54,13 +55,65 @@
     <div id="details" hidden>
       <h3>What's driving it <span class="muted small">(worst hour)</span></h3>
       <ul id="factorBars" class="factors"></ul>
+      <p class="muted small">Each bar is 0–100, where higher means <em>more</em> likely to smell.</p>
+
       <h3>Hour by hour</h3>
       <div class="table-scroll">
         <table id="hourTable">
-          <thead><tr><th>Hour</th><th>Chance</th><th>Wind</th><th>Off-axis</th><th>Stability</th><th>RH</th><th>Vis</th></tr></thead>
+          <thead><tr>
+            <th>Hour</th><th>Chance</th><th>Wind</th><th>Off-axis</th>
+            <th>Stability</th><th>Humidity</th><th>Visibility</th>
+          </tr></thead>
           <tbody></tbody>
         </table>
       </div>
+
+      <details class="glossary">
+        <summary>What these terms mean</summary>
+        <dl>
+          <dt>Wind</dt>
+          <dd>Direction the wind is blowing <em>from</em>, and its speed in <strong>mph</strong>.
+            A south wind pushes the mill plume north. Light winds are usually worse than
+            strong ones: a breeze delivers the smell undiluted, a gale shreds it.</dd>
+
+          <dt>Off-axis</dt>
+          <dd>How far you are, in degrees, from the centre of the plume's path. 0° means
+            the plume is aimed straight at you; 90° means it's passing to one side;
+            180° means it's heading the opposite way.</dd>
+
+          <dt>Downwind alignment</dt>
+          <dd>Off-axis converted to a 0–100 score, widened to account for how much
+            Port Townsend's winds wander hour to hour and how uncertain any forecast's
+            wind direction is.</dd>
+
+          <dt>Stability <span class="muted">(the one everybody asks about)</span></dt>
+          <dd>How strongly the air is layered, which decides whether the smell rises away
+            or stays at nose level. On a clear, calm night the ground cools, cold air
+            settles underneath warmer air above — a <em>temperature inversion</em> — and it
+            acts like a lid. High stability means that lid is on and the plume is trapped
+            near the ground. Low stability means the air is churning and carries the smell
+            upward. This is why the mill can be unnoticeable at noon and overwhelming at 3am
+            with no change at the mill itself.</dd>
+
+          <dt>Decoupling</dt>
+          <dd>When the wind is very light <em>and</em> that lid is very low, wind direction
+            stops meaning anything at all — the air near the ground detaches from the flow
+            above and drifts wherever the terrain sends it. On those nights the smell can
+            reach you from a direction the forecast says is impossible.</dd>
+
+          <dt>Fog &amp; humidity</dt>
+          <dd>Damp air holds odor compounds at nose level, and fog means a shallow,
+            saturated, very stable layer. Both make things worse.</dd>
+
+          <dt>Cold-air pooling</dt>
+          <dd>Heavy odor gases and cold air both flow downhill and collect in low spots,
+            so low-lying and shoreline addresses catch more.</dd>
+
+          <dt>Rain washout</dt>
+          <dd>Rain scrubs sulfur compounds out of the air. Shown so that higher is worse,
+            like the other bars — 100 means dry, low means it's raining and clearing.</dd>
+        </dl>
+      </details>
     </div>
   </section>
 
@@ -80,6 +133,10 @@
       <button type="button" class="report" data-smell="1">Faint</button>
       <button type="button" class="report" data-smell="0">Nothing</button>
     </div>
+    <p id="answerLine" class="answer-line" hidden>
+      <span id="answerText"></span>
+      <button type="button" id="clearAnswer" class="link">Clear</button>
+    </p>
 
     <div id="whenBlock" hidden>
       <h3>When?</h3>
@@ -94,6 +151,10 @@
     </div>
 
     <p id="feedbackStatus" class="muted small"></p>
+    <p id="storageNote" class="muted small">
+      <strong>Saved on this device only.</strong> Nothing you log here is sent anywhere —
+      it stays in this browser, and clearing your browser data erases it.
+    </p>
 
     <div id="shareBlock" hidden>
       <label class="field checkbox">
@@ -127,29 +188,76 @@
     </label>
     <p class="muted small">
       Browsers can only notify you while this page is open or when you reopen it. For a
-      dependable nightly push to your phone, run <code>notifier/notify.mjs</code> —
-      see the README.
+      dependable nightly push to your phone, see
+      <a href="https://github.com/whiff-pt/whiff-pt.github.io#scheduled-notifications" target="_blank" rel="noopener">the setup notes</a>.
     </p>
+
     <label class="field">Night window
       <span class="inline">
-        <input id="nightStart" type="number" min="12" max="23" value="19"> :00 to
-        <input id="nightEnd" type="number" min="1" max="11" value="7"> :00
+        <select id="nightStart"></select> to <select id="nightEnd"></select>
       </span>
     </label>
+    <p class="muted small">The hours counted as "tonight". Anything outside this range is ignored.</p>
+
     <label class="field">Forecast model
       <select id="modelSelect">
-        <option value="best_match">Best available (5 nights)</option>
-        <option value="gfs_hrrr">HRRR 3 km, high-res (2 nights)</option>
-        <option value="ecmwf_ifs025">ECMWF IFS</option>
+        <option value="best_match">Best available — 5 nights</option>
+        <option value="gfs_hrrr">HRRR high-resolution — 2 nights</option>
+        <option value="ecmwf_ifs025">ECMWF — 5 nights</option>
       </select>
     </label>
+    <details class="glossary">
+      <summary>Which model should I use?</summary>
+      <p><strong>Best available</strong> is the right choice unless you have a reason
+        otherwise. <a href="https://open-meteo.com/en/docs" target="_blank" rel="noopener">Open-Meteo</a>
+        picks whichever forecast is most skilful for this location and stitches them
+        together, giving five nights of outlook.</p>
+      <p><strong>HRRR</strong> is the US weather service's
+        <a href="https://rapidrefresh.noaa.gov/hrrr/" target="_blank" rel="noopener">High-Resolution Rapid Refresh</a>
+        — a 3 km grid updated hourly. Its fine grid resolves the Quimper Peninsula's
+        terrain better than the others, which matters for exactly the light-wind
+        drainage nights this app cares about. The trade-off is that it only runs
+        48 hours ahead, so you lose the longer outlook.</p>
+      <p><strong>ECMWF</strong> is the European model, generally the best in the world
+        at large-scale pattern forecasting but on a coarser grid here.</p>
+      <p>If tonight matters and the three disagree, that disagreement is itself the
+        useful signal: it means the forecast is genuinely uncertain.</p>
+    </details>
+  </section>
+
+  <!-- ── Install on phone ────────────────────────────────────────────── -->
+  <section class="card">
+    <h2>Put it on your phone</h2>
+    <p class="muted small">It installs as an app with its own icon — no app store, no account.</p>
+    <details class="glossary">
+      <summary>iPhone / iPad (Safari)</summary>
+      <ol>
+        <li>Open this page in <strong>Safari</strong> (it won't work from Chrome on iOS).</li>
+        <li>Tap the <strong>Share</strong> button — the square with an arrow, at the bottom.</li>
+        <li>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+      </ol>
+    </details>
+    <details class="glossary">
+      <summary>Android (Chrome)</summary>
+      <ol>
+        <li>Tap the <strong>⋮</strong> menu, top right.</li>
+        <li>Tap <strong>Install app</strong>, or <strong>Add to Home screen</strong>.</li>
+      </ol>
+    </details>
+    <p class="muted small">Your address is remembered on each device separately, so set it
+      once on your phone too.</p>
   </section>
 
   <p class="disclaimer">
     Not affiliated with Port Townsend Paper Co., the Dept. of Ecology or ORCAA.
-    This is a physical estimate from public weather forecasts, not a measurement
-    and not calibrated against observed odor reports. To report an actual odor
-    event, call ORCAA at 1-800-422-5623.
+    This is a physical estimate from public weather forecasts, not a measurement,
+    and it has been checked against only one confirmed odor event so far — treat
+    it as a rough guide, not a guarantee. To report an actual odor event, call
+    ORCAA at 1-800-422-5623.
+    <br>
+    <a href="https://github.com/whiff-pt/whiff-pt.github.io#readme" target="_blank" rel="noopener">How it works &amp; full documentation</a> ·
+    <a href="https://github.com/whiff-pt/whiff-pt.github.io" target="_blank" rel="noopener">Source code</a> ·
+    Weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
     <span id="dataStamp" class="muted"></span>
   </p>
 </main>

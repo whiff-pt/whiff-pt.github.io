@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { argv, env, exit } from 'node:process';
 import { siteGeometry, buildNights, currentNightKey, explain, compass } from '../src/model.js';
+import { fmtSpeed, fmtHour12 } from '../src/units.js';
 import { fetchWeather, nowInPT } from '../src/weather.js';
 
 const args = parseArgs(argv.slice(2));
@@ -58,7 +59,7 @@ for (const sub of config.subscribers ?? []) {
   const over = pct >= threshold;
   console.log(
     `${sub.label}: ${pct}% (threshold ${threshold}%) — peak ${tonight.peak.hour.iso}, ` +
-    `${compass(tonight.peak.factors.windDir)} @ ${tonight.peak.factors.ws.toFixed(1)} m/s`,
+    `${compass(tonight.peak.factors.windDir)} @ ${fmtSpeed(tonight.peak.factors.ws)}`,
   );
 
   if (!over && !args.force) continue;
@@ -135,9 +136,7 @@ async function post(url, init, name) {
 }
 
 function fmtHour(iso) {
-  const h = Number(iso.slice(11, 13));
-  const suffix = h < 12 ? 'am' : 'pm';
-  return `${((h + 11) % 12) + 1}${suffix}`;
+  return fmtHour12(Number(iso.slice(11, 13)));
 }
 
 function parseArgs(list) {

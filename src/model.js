@@ -8,6 +8,8 @@
  * observed odor reports. See README "Calibration" before trusting the numbers.
  */
 
+import { fmtDistance, fmtSpeed } from './units.js';
+
 /** Washington Dept. of Ecology facility record for PORT TOWNSEND PAPER, 100 Mill Rd. */
 export const MILL = {
   lat: 48.094076,
@@ -34,7 +36,6 @@ export const DEFAULTS = {
   hourDecay: 0.35, //    correlation damping when combining hours in one night
 };
 
-const TAU = Math.PI * 2;
 const toRad = (d) => (d * Math.PI) / 180;
 const toDeg = (r) => (r * 180) / Math.PI;
 
@@ -290,7 +291,7 @@ export function explain(night, geo) {
   if (f.decoupled > 0.45 && f.alignment < 0.5) {
     out.push({
       good: false,
-      text: `Light wind (${f.ws.toFixed(1)} m/s) under a collapsed boundary layer — the plume drifts and pools locally rather than blowing in any one direction.`,
+      text: `Light wind (${fmtSpeed(f.ws)}) under a collapsed boundary layer — the plume drifts and pools locally rather than blowing in any one direction.`,
     });
   } else if (f.alignment > 0.6) {
     out.push({
@@ -324,12 +325,12 @@ export function explain(night, geo) {
 
   if (f.moisture > 0.5) out.push({ good: false, text: 'Fog or near-saturated air holds odor compounds at nose level.' });
   if (f.rain < 0.6) out.push({ good: true, text: 'Rain is washing sulfur compounds out of the air.' });
-  if (f.windSpeed < 0.3) out.push({ good: true, text: `Strong wind (${f.ws.toFixed(1)} m/s) dilutes the plume quickly.` });
+  if (f.windSpeed < 0.3) out.push({ good: true, text: `Strong wind (${fmtSpeed(f.ws)}) dilutes the plume quickly.` });
   if (f.pooling > 0.15) out.push({ good: false, text: 'Your address is low-lying, where cold air and heavy odor gases settle.' });
 
   out.push({
     good: geo.distKm > 6,
-    text: `You are ${geo.distKm.toFixed(1)} km ${compass(geo.bearingFromMill)} of the mill.`,
+    text: `You are ${fmtDistance(geo.distKm)} ${compass(geo.bearingFromMill)} of the mill.`,
   });
 
   return out;

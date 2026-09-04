@@ -13,6 +13,7 @@
 
 import { argv, exit } from 'node:process';
 import { siteGeometry, buildNights, scoreHour, explain, compass, MILL } from '../src/model.js';
+import { fmtDistance, fmtSpeed, fmtElevation, fmtHour12, fmtTemp } from '../src/units.js';
 import { fetchHistory, fetchElevation, geocode } from '../src/weather.js';
 
 const args = parseArgs(argv.slice(2));
@@ -55,27 +56,27 @@ if (!night) {
 const pct = (p) => `${Math.round(p * 100)}%`;
 
 console.log(`\n  ${site.label}`);
-console.log(`  ${geo.distKm.toFixed(2)} km ${compass(geo.bearingFromMill)} of the mill ` +
-            `(bearing ${Math.round(geo.bearingFromMill)}°), ${Math.round(geo.elevationM)} m elevation`);
+console.log(`  ${fmtDistance(geo.distKm)} ${compass(geo.bearingFromMill)} of the mill ` +
+            `(bearing ${Math.round(geo.bearingFromMill)}°), ${fmtElevation(geo.elevationM)} elevation`);
 console.log(`  Archive: Open-Meteo historical forecast, grid ${wx.grid.lat.toFixed(3)}, ${wx.grid.lon.toFixed(3)}\n`);
 
 console.log(`  NIGHT OF ${args.date}:  ${pct(night.p)}  — ${night.level.label}\n`);
 
-console.log('  hour   chance  wind          off-axis  align  stab  moist  BLH    T2    T110m  inv    RH');
-console.log('  ' + '-'.repeat(88));
+console.log('   hour chance   dir   speed  offaxis    align  stab  moist     BLH   T2  T110m      inv   RH%');
+console.log('  ' + '-'.repeat(92));
 for (const s of night.hours) {
   const h = s.hour;
   const inv = Number.isFinite(h.temp1000) ? h.temp1000 - h.temp2m : NaN;
   console.log(
-    `  ${h.iso.slice(11, 16)}  ${pct(s.p).padStart(5)}   ` +
-    `${compass(h.windDir).padEnd(3)} ${h.windSpeed.toFixed(1).padStart(4)} m/s  ` +
+    `  ${fmtHour12(Number(h.iso.slice(11, 13))).padStart(5)}  ${pct(s.p).padStart(5)}   ` +
+    `${compass(h.windDir).padEnd(3)} ${fmtSpeed(h.windSpeed).padStart(7)}  ` +
     `${String(Math.round(s.factors.offAxisDeg)).padStart(6)}°  ` +
     `${s.factors.alignment.toFixed(2).padStart(5)}  ` +
     `${s.factors.stability.toFixed(2).padStart(4)}  ` +
     `${s.factors.moisture.toFixed(2).padStart(5)}  ` +
-    `${String(Math.round(h.blh)).padStart(4)}m  ` +
-    `${h.temp2m.toFixed(1).padStart(4)}  ${h.temp1000.toFixed(1).padStart(5)}  ` +
-    `${(inv >= 0 ? '+' : '') + inv.toFixed(1)}`.padStart(6) + `  ` +
+    `${(Math.round(h.blh * 3.28084) + ' ft').padStart(6)}  ` +
+    `${fmtTemp(h.temp2m).padStart(5)}  ${fmtTemp(h.temp1000).padStart(5)}  ` +
+    `${((inv >= 0 ? '+' : '') + (inv * 9 / 5).toFixed(1) + '°F').padStart(7)}  ` +
     `${String(Math.round(h.rh)).padStart(3)}%`,
   );
 }

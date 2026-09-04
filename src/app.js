@@ -6,6 +6,9 @@ import {
 } from './model.js';
 import { fetchWeather, fetchElevation, geocode, nowInPT } from './weather.js';
 import { submit, requestRemoval, buildRow, isShareConfigured } from './share.js';
+import {
+  fmtDistance, fmtSpeed, fmtElevation, fmtVisibility, fmtHour12, fmtHourRange,
+} from './units.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE = 'whiff.settings.v1';
@@ -124,8 +127,8 @@ async function setSite(site) {
   const geo = siteGeometry(state.site);
   $('locationSummary').innerHTML =
     `<strong>${escapeHtml(state.site.label || 'Your spot')}</strong> — ` +
-    `${geo.distKm.toFixed(1)} km ${compass(geo.bearingFromMill)} of the mill` +
-    (state.site.elevationM != null ? `, ${Math.round(state.site.elevationM)} m elevation` : '');
+    `${fmtDistance(geo.distKm)} ${compass(geo.bearingFromMill)} of the mill` +
+    (state.site.elevationM != null ? `, ${fmtElevation(state.site.elevationM)} elevation` : '');
   await refresh();
 }
 
@@ -181,7 +184,7 @@ function render(geo, now) {
 
   const peakTime = tonight.peak.hour.time;
   $('nightLabel').textContent =
-    `${nightName(tonight.date, now)} · ${state.nightStartHour}:00–${String(state.nightEndHour).padStart(2, '0')}:00`;
+    `${nightName(tonight.date, now)} · ${fmtHourRange(state.nightStartHour, state.nightEndHour)}`;
   $('headline').innerHTML = pct >= 50
     ? `<strong>${lvl.label}.</strong> Worst around ${fmtHour(peakTime)} (${Math.round(tonight.peak.p * 100)}% that hour).`
     : `<strong>${lvl.label}.</strong> Peak risk near ${fmtHour(peakTime)}.`;
@@ -190,22 +193,22 @@ function render(geo, now) {
     .map((r) => `<li class="${r.good ? 'good' : 'bad'}">${escapeHtml(r.text)}</li>`)
     .join('');
 
-  renderFactors(tonight.peak.factors);
+  renderFactors(tonight.peak.factors, geo);
   renderHours(tonight);
   renderOutlook(now);
   renderFeedback(tonight);
   drawPlume(tonight);
 }
 
-function renderFactors(f) {
+function renderFactors(f, geo) {
   const rows = [
-    ['Downwind alignment', f.alignment, `${Math.round(f.offAxisDeg)}°`],
-    ['Distance from mill', f.distance, ''],
-    ['Wind speed window', f.windSpeed, `${f.ws.toFixed(1)}`],
-    ['Inversion / stagnation', f.stability, ''],
+    ['Downwind alignment', f.alignment, `${Math.round(f.offAxisDeg)}° off`],
+    ['Distance from mill', f.distance, fmtDistance(geo.distKm)],
+    ['Wind speed', f.windSpeed, fmtSpeed(f.ws)],
+    ['Stability / inversion', f.stability, ''],
     ['Fog & humidity', f.moisture, ''],
     ['Cold-air pooling', clamp(f.pooling / 0.5), ''],
-    ['Rain washout (higher = drier)', f.rain, ''],
+    ['Rain washout (100 = dry)', f.rain, ''],
   ];
   $('factorBars').innerHTML = rows.map(([name, v, note]) => `
     <li>
@@ -222,11 +225,11 @@ function renderHours(night) {
     return `<tr class="${h.time.getTime() === peakTime ? 'peak' : ''}">
       <td>${fmtHour(h.time)}</td>
       <td class="lvl-${level(s.p).key}">${Math.round(s.p * 100)}%</td>
-      <td>${compass(h.windDir)} ${h.windSpeed.toFixed(1)}</td>
+      <td>${compass(h.windDir)} ${fmtSpeed(h.windSpeed)}</td>
       <td>${Math.round(s.factors.offAxisDeg)}°</td>
       <td>${Math.round(s.factors.stability * 100)}</td>
       <td>${Number.isFinite(h.rh) ? Math.round(h.rh) : '–'}%</td>
-      <td>${Number.isFinite(h.visibility) ? (h.visibility / 1000).toFixed(1) + ' km' : '–'}</td>
+      <td>${fmtVisibility(h.visibility)}</td>
     </tr>`;
   }).join('');
 }
@@ -247,6 +250,17 @@ function renderFeedback(tonight) {
   document.querySelectorAll('.report').forEach((b) => {
     b.setAttribute('aria-pressed', String(mine?.smell === Number(b.dataset.smell)));
   });
+
+  // Spell the saved answer out in words. A highlighted button alone reads as
+  // "stuck" rather than "this is what you told us" — especially for "Nothing",
+  // where the affirmative accent colour on a negative answer looks like a bug.
+  const LABELS = { 0: 'Nothing', 1: 'a faint smell', 2: 'a noticeable smell', 3: 'a strong smell' };
+  $('answerLine').hidden = !mine;
+  if (mine) {
+    $('answerText').textContent = mine.smell === 0
+      ? 'You logged: no smell tonight.'
+      : `You logged: ${LABELS[mine.smell]}${mine.smellWindow ? ` (${WINDOW_LABELS[mine.smellWindow]})` : ''}.`;
+  }
 
   // The timing question only makes sense once something was actually smelled.
   $('whenBlock').hidden = !(mine && mine.smell >= 1);
@@ -355,7 +369,23 @@ async function maybeNotify() {
 // ---------------------------------------------------------------------------
 
 function fmtHour(d) {
-  return d.toLocaleTimeString([], { hour: 'numeric', hour12: true }).replace(' ', '').toLowerCase();
+  return fmtHour12(d.getHours());
+}
+
+const WINDOW_LABELS = {
+  evening: 'evening', late: 'late night', predawn: 'pre-dawn', allnight: 'all night',
+};
+
+/** Build an hour dropdown labelled in am/pm but valued in 24h. */
+function fillHourSelect(select, from, to, selected) {
+  select.innerHTML = '';
+  for (let h = from; h <= to; h += 1) {
+    const opt = document.createElement('option');
+    opt.value = String(h);
+    opt.textContent = fmtHour12(h);
+    select.append(opt);
+  }
+  select.value = String(selected);
 }
 
 function nightName(date, now) {
@@ -439,6 +469,13 @@ function wire() {
     });
   }
 
+  $('clearAnswer').addEventListener('click', () => {
+    const tonight = state.nights[0];
+    if (!tonight) return;
+    writeLog(readLog().filter((r) => r.night !== tonight.key));
+    renderFeedback(tonight);
+  });
+
   $('modelSelect').addEventListener('change', (e) => {
     state.model = e.target.value;
     save();
@@ -497,6 +534,11 @@ function wire() {
 
   if (isShareConfigured()) {
     $('shareBlock').hidden = false;
+    // The blanket "nothing is sent anywhere" promise stops being true the
+    // moment a backend exists, so soften it to match reality.
+    $('storageNote').innerHTML =
+      '<strong>Saved on this device.</strong> Nothing is sent anywhere unless you '
+      + 'tick the box below.';
     $('shareEnabled').addEventListener('change', (e) => {
       state.shareEnabled = e.target.checked;
       save();
@@ -550,8 +592,8 @@ function applySettingsToUI() {
   $('threshold').value = state.threshold;
   $('thresholdOut').textContent = `${state.threshold}%`;
   $('notifyEnabled').checked = state.notifyEnabled && ('Notification' in window) && Notification.permission === 'granted';
-  $('nightStart').value = state.nightStartHour;
-  $('nightEnd').value = state.nightEndHour;
+  fillHourSelect($('nightStart'), 12, 23, state.nightStartHour);
+  fillHourSelect($('nightEnd'), 1, 11, state.nightEndHour);
   $('modelSelect').value = state.model;
 }
 

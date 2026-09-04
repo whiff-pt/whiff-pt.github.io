@@ -3,7 +3,7 @@
  * offline. Forecast requests always go to the network — a stale forecast is
  * worse than no forecast.
  */
-const CACHE = 'whiff-v2';
+const CACHE = 'whiff-v3';
 // Note the absence of './index.html': many static hosts (including `serve`)
 // answer it with a 301 to './', and the Cache API refuses to store a redirected
 // response. Listing both meant addAll rejected and the worker never installed.
@@ -14,6 +14,7 @@ const SHELL = [
   './src/model.js',
   './src/weather.js',
   './src/share.js',
+  './src/units.js',
   './src/share-config.js',
   './manifest.webmanifest',
 ];
