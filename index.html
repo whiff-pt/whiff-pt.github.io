@@ -36,6 +36,11 @@
 
   <!-- ── Tonight ─────────────────────────────────────────────────────── -->
   <section class="card verdict" id="verdictCard" hidden>
+    <div class="segmented" role="group" aria-label="Which hours to forecast">
+      <button type="button" class="period" data-mode="day">Day</button>
+      <button type="button" class="period" data-mode="night">Night</button>
+      <button type="button" class="period" data-mode="full">24 hours</button>
+    </div>
     <div class="dial-wrap">
       <svg class="dial" viewBox="0 0 200 200" role="img" aria-labelledby="dialLabel">
         <title id="dialLabel">Probability of smelling the mill tonight</title>
@@ -119,13 +124,13 @@
 
   <!-- ── Outlook ─────────────────────────────────────────────────────── -->
   <section class="card" id="outlookCard" hidden>
-    <h2>Next few nights</h2>
+    <h2 id="outlookHeading">Next few nights</h2>
     <ul id="outlook" class="outlook"></ul>
   </section>
 
   <!-- ── Did you smell it? ───────────────────────────────────────────── -->
   <section class="card" id="feedbackCard" hidden>
-    <h2>Did you actually smell it?</h2>
+    <h2 id="feedbackHeading">Did you actually smell it?</h2>
     <p class="muted small">This is the only thing that can tell whether the forecast above is any good.</p>
     <div class="row">
       <button type="button" class="report" data-smell="3">Strong</button>

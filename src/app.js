@@ -1,8 +1,8 @@
 /* Whiff — UI layer. State lives in localStorage; all forecasting is in model.js. */
 
 import {
-  MILL, DEFAULTS, MODEL_VERSION, siteGeometry, buildNights, currentNightKey, explain,
-  compass, clamp, level,
+  MILL, DEFAULTS, MODEL_VERSION, siteGeometry, buildNights, buildPeriods, currentNightKey,
+  currentPeriodKey, explain, compass, clamp, level,
 } from './model.js';
 import { fetchWeather, fetchElevation, geocode, nowInPT } from './weather.js';
 import { submit, requestRemoval, buildRow, isShareConfigured } from './share.js';
@@ -24,7 +24,9 @@ const state = {
   lastNotifiedNight: null,
   shareEnabled: false, // never default this to true
   hasEverShared: false,
-  nights: [],
+  periodMode: 'night', // 'day' | 'night' | 'full'
+  nights: [],   // always the night periods; the report log is keyed to these
+  periods: [],  // whichever periods are currently on screen
 };
 
 // ---------------------------------------------------------------------------
@@ -145,9 +147,21 @@ async function refresh() {
     const now = nowInPT();
     const todayKey = currentNightKey(now, opts);
 
-    const all = buildNights(wx.hourly, geo, opts);
-    const startIdx = all.findIndex((n) => n.key === todayKey);
-    state.nights = startIdx >= 0 ? all.slice(startIdx) : all;
+    // Nights are computed whatever is on screen: the report log is keyed to
+    // them, and "did you smell it last night" has to keep working while you're
+    // looking at a daytime forecast.
+    const nights = buildNights(wx.hourly, geo, opts);
+    const nightIdx = nights.findIndex((n) => n.key === todayKey);
+    state.nights = nightIdx >= 0 ? nights.slice(nightIdx) : nights;
+
+    if (state.periodMode === 'night') {
+      state.periods = state.nights;
+    } else {
+      const all = buildPeriods(wx.hourly, geo, opts, state.periodMode);
+      const key = currentPeriodKey(now, state.periodMode, opts);
+      const idx = all.findIndex((pd) => pd.key === key);
+      state.periods = idx >= 0 ? all.slice(idx) : all;
+    }
 
     render(geo, now);
     flushUnshared();
@@ -166,12 +180,16 @@ async function refresh() {
 // ---------------------------------------------------------------------------
 
 function render(geo, now) {
+  const current = state.periods[0];
   const tonight = state.nights[0];
-  for (const id of ['verdictCard', 'outlookCard', 'feedbackCard']) $(id).hidden = !tonight;
-  if (!tonight) return;
+  $('verdictCard').hidden = !current;
+  $('outlookCard').hidden = !current;
+  $('feedbackCard').hidden = !tonight;
+  if (tonight) renderFeedback(tonight);
+  if (!current) return;
 
-  const pct = Math.round(tonight.p * 100);
-  const lvl = tonight.level;
+  const pct = Math.round(current.p * 100);
+  const lvl = current.level;
 
   $('pctText').textContent = `${pct}%`;
   $('levelText').textContent = lvl.label;
@@ -179,25 +197,39 @@ function render(geo, now) {
 
   const circ = 2 * Math.PI * 84;
   const dial = $('dialValue');
-  dial.style.strokeDashoffset = String(circ * (1 - tonight.p));
+  dial.style.strokeDashoffset = String(circ * (1 - current.p));
   dial.style.stroke = `var(--${lvl.key})`;
 
-  const peakTime = tonight.peak.hour.time;
+  const peakTime = current.peak.hour.time;
   $('nightLabel').textContent =
-    `${nightName(tonight.date, now)} · ${fmtHourRange(state.nightStartHour, state.nightEndHour)}`;
+    `${periodName(current.date, now, state.periodMode)} · ${windowLabel(current)}`;
   $('headline').innerHTML = pct >= 50
-    ? `<strong>${lvl.label}.</strong> Worst around ${fmtHour(peakTime)} (${Math.round(tonight.peak.p * 100)}% that hour).`
+    ? `<strong>${lvl.label}.</strong> Worst around ${fmtHour(peakTime)} (${Math.round(current.peak.p * 100)}% that hour).`
     : `<strong>${lvl.label}.</strong> Peak risk near ${fmtHour(peakTime)}.`;
 
-  $('reasons').innerHTML = explain(tonight, geo)
+  $('reasons').innerHTML = explain(current, geo)
     .map((r) => `<li class="${r.good ? 'good' : 'bad'}">${escapeHtml(r.text)}</li>`)
     .join('');
 
-  renderFactors(tonight.peak.factors, geo);
-  renderHours(tonight);
+  $('outlookHeading').textContent = OUTLOOK_HEADINGS[state.periodMode];
+  $('dialLabel').textContent = `Probability of smelling the mill — ${PERIOD_LABELS[state.periodMode]}`;
+
+  renderFactors(current.peak.factors, geo);
+  renderHours(current);
   renderOutlook(now);
-  renderFeedback(tonight);
-  drawPlume(tonight);
+  drawPlume(current);
+}
+
+const PERIOD_LABELS = { day: 'daytime', night: 'overnight', full: 'next 24 hours' };
+const OUTLOOK_HEADINGS = {
+  day: 'Next few days', night: 'Next few nights', full: 'Next few 24-hour periods',
+};
+
+/** "7pm – 7am", or "24 hours from 7am" where a range would read as a typo. */
+function windowLabel(period) {
+  return period.mode === 'full'
+    ? `24 hours from ${fmtHour12(period.startHour)}`
+    : fmtHourRange(period.startHour, period.endHour);
 }
 
 function renderFactors(f, geo) {
@@ -235,9 +267,9 @@ function renderHours(night) {
 }
 
 function renderOutlook(now) {
-  $('outlook').innerHTML = state.nights.slice(0, 5).map((n) => `
+  $('outlook').innerHTML = state.periods.slice(0, 5).map((n) => `
     <li>
-      <span>${nightName(n.date, now)}</span>
+      <span>${periodName(n.date, now, state.periodMode)}</span>
       <span class="bar"><span style="width:${(n.p * 100).toFixed(0)}%;background:var(--${n.level.key})"></span></span>
       <span class="val">${Math.round(n.p * 100)}%</span>
     </li>`).join('');
@@ -267,6 +299,11 @@ function renderFeedback(tonight) {
   document.querySelectorAll('.when').forEach((b) => {
     b.setAttribute('aria-pressed', String(mine?.smellWindow === b.dataset.when));
   });
+
+  // Say which night, because the forecast above may be showing daytime.
+  $('feedbackHeading').textContent = state.periodMode === 'night'
+    ? 'Did you actually smell it?'
+    : 'Did you smell it overnight?';
 
   const needsWhen = mine && mine.smell >= 1 && !mine.smellWindow;
   $('feedbackStatus').textContent = needsWhen
@@ -388,14 +425,17 @@ function fillHourSelect(select, from, to, selected) {
   select.value = String(selected);
 }
 
-function nightName(date, now) {
+function periodName(date, now, mode) {
   const day = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
   const tomorrow = new Date(now.getTime());
   tomorrow.setDate(tomorrow.getDate() + 1);
-  if (day(date) === day(now)) return 'Tonight';
+  if (day(date) === day(now)) return mode === 'night' ? 'Tonight' : 'Today';
   if (day(date) === day(tomorrow)) return 'Tomorrow';
   return date.toLocaleDateString([], { weekday: 'short' });
 }
+
+/** Back-compat for the notification text, which is always about the night. */
+const nightName = (date, now) => periodName(date, now, 'night');
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -474,6 +514,16 @@ function wire() {
     if (!tonight) return;
     writeLog(readLog().filter((r) => r.night !== tonight.key));
     renderFeedback(tonight);
+  });
+
+  document.querySelectorAll('.period').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (state.periodMode === btn.dataset.mode) return;
+      state.periodMode = btn.dataset.mode;
+      save();
+      syncPeriodButtons();
+      refresh();
+    });
   });
 
   $('modelSelect').addEventListener('change', (e) => {
@@ -588,7 +638,14 @@ function wire() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 }
 
+function syncPeriodButtons() {
+  document.querySelectorAll('.period').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === state.periodMode));
+  });
+}
+
 function applySettingsToUI() {
+  syncPeriodButtons();
   $('threshold').value = state.threshold;
   $('thresholdOut').textContent = `${state.threshold}%`;
   $('notifyEnabled').checked = state.notifyEnabled && ('Notification' in window) && Notification.permission === 'granted';

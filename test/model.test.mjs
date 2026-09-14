@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MILL, siteGeometry, scoreHour, scoreNight, buildNights, angDiff, compass, haversineKm,
+  buildPeriods, periodWindow, inPeriod, currentPeriodKey,
 } from '../src/model.js';
 
 /** An address 3 km due north-east of the mill (roughly downtown Port Townsend). */
@@ -182,4 +183,100 @@ test('buildNights groups after-midnight hours with the previous evening', () => 
   assert.equal(nights[1].hours.length, 12); // 19:00-23:00 plus 00:00-06:00
   assert.equal(nights[2].hours.length, 5); //  19:00-23:00 only
   assert.ok(nights.every((n) => n.p > 0 && n.p < 1));
+});
+
+// ---------------------------------------------------------------------------
+// Day / night / 24-hour periods
+// ---------------------------------------------------------------------------
+
+/** A full two days of hourly data, every hour identical apart from the clock. */
+function twoDays() {
+  const hours = [];
+  for (const d of ['12', '13', '14']) {
+    for (let hl = 0; hl < 24; hl += 1) {
+      const iso = `2026-10-${d}T${String(hl).padStart(2, '0')}:00`;
+      hours.push(hour({ hourLocal: hl, time: new Date(iso), iso }));
+    }
+  }
+  return hours;
+}
+
+test('the three windows derive from the same night boundaries', () => {
+  assert.deepEqual(periodWindow('night'), { startHour: 19, endHour: 7 });
+  assert.deepEqual(periodWindow('day'), { startHour: 7, endHour: 19 });
+  assert.deepEqual(periodWindow('full'), { startHour: 7, endHour: 7 });
+
+  // Moving the night boundary moves the other two with it.
+  const opts = { nightStartHour: 20, nightEndHour: 6 };
+  assert.deepEqual(periodWindow('day', opts), { startHour: 6, endHour: 20 });
+  assert.deepEqual(periodWindow('full', opts), { startHour: 6, endHour: 6 });
+});
+
+test('inPeriod handles same-day, wrapping, and full-24h windows', () => {
+  assert.ok(inPeriod(12, 7, 19));    // midday is in the day window
+  assert.ok(!inPeriod(22, 7, 19));   // late evening is not
+  assert.ok(inPeriod(22, 19, 7));    // ...but it is in the night window
+  assert.ok(inPeriod(3, 19, 7));     // and so is 3am
+  assert.ok(!inPeriod(12, 19, 7));   // midday is not
+  // start === end means a whole 24 hours, so every hour qualifies.
+  for (let h = 0; h < 24; h += 1) assert.ok(inPeriod(h, 7, 7), `hour ${h}`);
+});
+
+test('day periods hold 12 hours and never cross midnight', () => {
+  const days = buildPeriods(twoDays(), downtown, {}, 'day');
+  assert.deepEqual(days.map((d) => d.key), ['2026-10-12', '2026-10-13', '2026-10-14']);
+  for (const d of days) {
+    // scorePeriod replaces `hours` with scored wrappers; the raw hour is .hour
+    const raw = d.hours.map((s) => s.hour);
+    assert.equal(raw.length, 12);
+    assert.equal(d.mode, 'day');
+    assert.ok(raw.every((h) => h.hourLocal >= 7 && h.hourLocal < 19));
+    // Every hour of a day period sits on one calendar date.
+    assert.equal(new Set(raw.map((h) => h.iso.slice(0, 10))).size, 1);
+  }
+});
+
+test('a full period is 24 hours anchored at 7am, spanning two dates', () => {
+  const full = buildPeriods(twoDays(), downtown, {}, 'full');
+  const complete = full.filter((f) => f.hours.length === 24);
+  assert.ok(complete.length >= 2, `expected complete periods, got ${full.map((f) => f.hours.length)}`);
+  for (const f of complete) {
+    const raw = f.hours.map((s) => s.hour);
+    assert.equal(raw[0].hourLocal, 7);
+    assert.equal(raw.at(-1).hourLocal, 6);
+    assert.equal(new Set(raw.map((h) => h.iso.slice(0, 10))).size, 2);
+  }
+});
+
+test('a 24-hour period is at least as likely as the night it contains', () => {
+  const hours = twoDays();
+  const night = buildPeriods(hours, downtown, {}, 'night').find((n) => n.key === '2026-10-12');
+  const full = buildPeriods(hours, downtown, {}, 'full').find((f) => f.key === '2026-10-12');
+  // The 24h window contains the night's hours plus the day's, so more chances.
+  assert.ok(full.p >= night.p, `24h ${full.p} < night ${night.p}`);
+  assert.ok(full.p <= 0.93);
+});
+
+test('daytime hours score lower than the same hours treated as night', () => {
+  const dw = (downtown.bearingFromMill + 180) % 360;
+  const noon = scoreHour(hour({ hourLocal: 12, windDir: dw }), downtown).p;
+  const midnight = scoreHour(hour({ hourLocal: 0, windDir: dw }), downtown).p;
+  assert.ok(midnight > noon, `midnight ${midnight} should beat noon ${noon}`);
+});
+
+test('currentPeriodKey rolls a finished daytime window forward to tomorrow', () => {
+  const at2pm = new Date('2026-10-12T14:00');
+  const at8pm = new Date('2026-10-12T20:00');
+  const at3am = new Date('2026-10-12T03:00');
+
+  // Day: mid-afternoon is today; after 7pm today is over, so look at tomorrow.
+  assert.equal(currentPeriodKey(at2pm, 'day'), '2026-10-12');
+  assert.equal(currentPeriodKey(at8pm, 'day'), '2026-10-13');
+  assert.equal(currentPeriodKey(at3am, 'day'), '2026-10-12');
+
+  // Night and 24h wrap, so the small hours still belong to yesterday's anchor.
+  assert.equal(currentPeriodKey(at2pm, 'night'), '2026-10-12');
+  assert.equal(currentPeriodKey(at3am, 'night'), '2026-10-11');
+  assert.equal(currentPeriodKey(at3am, 'full'), '2026-10-11');
+  assert.equal(currentPeriodKey(at2pm, 'full'), '2026-10-12');
 });

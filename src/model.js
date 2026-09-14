@@ -213,7 +213,7 @@ export function scoreHour(h, geo, opts = {}) {
  * independent chances — so this is a noisy-OR with a geometric decay applied to
  * successively less-severe hours.
  */
-export function scoreNight(hours, geo, opts = {}) {
+export function scorePeriod(hours, geo, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const scored = hours
     .map((h) => ({ hour: h, ...scoreHour(h, geo, o) }))
@@ -231,6 +231,9 @@ export function scoreNight(hours, geo, opts = {}) {
   return { p, level: level(p), peak: ranked[0], hours: scored };
 }
 
+/** Back-compatible alias; a night is just one kind of period. */
+export const scoreNight = scorePeriod;
+
 export function level(p) {
   if (p < 0.1) return { key: 'unlikely', label: 'Unlikely' };
   if (p < 0.25) return { key: 'low', label: 'Low chance' };
@@ -239,20 +242,54 @@ export function level(p) {
   return { key: 'very-likely', label: 'Very likely' };
 }
 
+// ---------------------------------------------------------------------------
+// Periods: day, night, or the full 24 hours
+// ---------------------------------------------------------------------------
+
+export const PERIOD_MODES = ['day', 'night', 'full'];
+
 /**
- * Split normalized hourly data into consecutive nights and score each.
- * A "night" runs from nightStartHour on day D to nightEndHour on day D+1.
+ * All three windows derive from the same two user settings, so moving the
+ * night boundary moves the day and the 24-hour anchor with it.
+ *
+ *   night  nightStartHour -> nightEndHour   (7pm -> 7am, wraps midnight)
+ *   day    nightEndHour   -> nightStartHour (7am -> 7pm, same calendar day)
+ *   full   nightEndHour   -> nightEndHour   (7am -> 7am, a whole 24 hours)
  */
-export function buildNights(hourly, geo, opts = {}) {
+export function periodWindow(mode, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
+  if (mode === 'day') return { startHour: o.nightEndHour, endHour: o.nightStartHour };
+  if (mode === 'full') return { startHour: o.nightEndHour, endHour: o.nightEndHour };
+  return { startHour: o.nightStartHour, endHour: o.nightEndHour };
+}
+
+/** Equal start and end means a full 24 hours, which also wraps. */
+const wrapsMidnight = (startHour, endHour) => endHour <= startHour;
+
+export function inPeriod(hourLocal, startHour, endHour) {
+  return wrapsMidnight(startHour, endHour)
+    ? hourLocal >= startHour || hourLocal < endHour
+    : hourLocal >= startHour && hourLocal < endHour;
+}
+
+/**
+ * Split normalized hourly data into consecutive periods and score each.
+ *
+ * Note that `opts` keeps carrying nightStartHour/nightEndHour untouched: those
+ * still tell scoreHour which hours are genuinely night-time for the stability
+ * and pooling terms. The window only decides which hours land in which bucket.
+ */
+export function buildPeriods(hourly, geo, opts = {}, mode = 'night') {
+  const o = { ...DEFAULTS, ...opts };
+  const { startHour, endHour } = periodWindow(mode, o);
+  const wraps = wrapsMidnight(startHour, endHour);
   const buckets = new Map();
 
   for (const h of hourly) {
-    const inWindow = h.hourLocal >= o.nightStartHour || h.hourLocal < o.nightEndHour;
-    if (!inWindow) continue;
-    // Hours after midnight belong to the previous calendar day's night.
+    if (!inPeriod(h.hourLocal, startHour, endHour)) continue;
+    // In a wrapping window the small hours belong to the previous day's period.
     const anchor = new Date(h.time.getTime());
-    if (h.hourLocal < o.nightEndHour) anchor.setDate(anchor.getDate() - 1);
+    if (wraps && h.hourLocal < endHour) anchor.setDate(anchor.getDate() - 1);
     const key = nightKey(anchor);
     if (!buckets.has(key)) buckets.set(key, { key, date: new Date(anchor), hours: [] });
     buckets.get(key).hours.push(h);
@@ -260,8 +297,12 @@ export function buildNights(hourly, geo, opts = {}) {
 
   return [...buckets.values()]
     .sort((a, b) => a.date - b.date)
-    .map((b) => ({ ...b, ...scoreNight(b.hours, geo, o) }))
+    .map((b) => ({ ...b, mode, startHour, endHour, ...scorePeriod(b.hours, geo, o) }))
     .filter((n) => n.p !== undefined);
+}
+
+export function buildNights(hourly, geo, opts = {}) {
+  return buildPeriods(hourly, geo, opts, 'night');
 }
 
 /** Stable YYYY-MM-DD identifier for the evening a night begins on. */
@@ -270,12 +311,26 @@ export function nightKey(date) {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
 }
 
-/** Which night is "tonight" right now? */
-export function currentNightKey(now, opts = {}) {
-  const o = { ...DEFAULTS, ...opts };
+/**
+ * Which period is the current or next one of its kind?
+ *
+ * For a wrapping window, the small hours still belong to the period that began
+ * yesterday evening. For a same-day window, once it has ended the interesting
+ * one is tomorrow's — at 8pm nobody wants today's finished daytime forecast.
+ */
+export function currentPeriodKey(now, mode = 'night', opts = {}) {
+  const { startHour, endHour } = periodWindow(mode, opts);
   const anchor = new Date(now.getTime());
-  if (now.getHours() < o.nightEndHour) anchor.setDate(anchor.getDate() - 1);
+  if (wrapsMidnight(startHour, endHour)) {
+    if (now.getHours() < endHour) anchor.setDate(anchor.getDate() - 1);
+  } else if (now.getHours() >= endHour) {
+    anchor.setDate(anchor.getDate() + 1);
+  }
   return nightKey(anchor);
+}
+
+export function currentNightKey(now, opts = {}) {
+  return currentPeriodKey(now, 'night', opts);
 }
 
 // ---------------------------------------------------------------------------
